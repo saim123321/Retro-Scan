@@ -15,9 +15,13 @@ import warnings
 from flask import Flask, request, jsonify, render_template_string
 import traceback
 
+# Suppress unnecessary warnings
 warnings.filterwarnings("ignore")
 
+
+# Initialize NLTK resources
 def initialize_nltk():
+    """Download required NLTK data"""
     print("Downloading NLTK resources...")
     try:
         nltk.download('punkt', quiet=False)
@@ -28,6 +32,7 @@ def initialize_nltk():
         print("Attempting alternate download method...")
         import subprocess
         try:
+            # Try using system-level Python to download
             subprocess.call([sys.executable, '-m', 'nltk.downloader', 'punkt', 'stopwords'])
             print("NLTK resources downloaded using alternate method!")
         except Exception as e2:
@@ -35,7 +40,10 @@ def initialize_nltk():
             print("You may need to manually download NLTK resources using:")
             print("import nltk; nltk.download('punkt'); nltk.download('stopwords')")
 
+
+# Ensure sample file exists
 def ensure_sample_file_exists(filename="sample_article.txt"):
+    """Check if sample file exists and create it if not"""
     if not os.path.exists(filename):
         print(f"Sample file '{filename}' not found. Creating sample file...")
         sample_text = """
@@ -61,7 +69,10 @@ def ensure_sample_file_exists(filename="sample_article.txt"):
             return False
     return True
 
+
+# Sample text for demonstration
 def get_sample_text():
+    """Return a sample text for demonstration"""
     return """
     Artificial intelligence (AI) is intelligence demonstrated by machines, as opposed to natural intelligence displayed by animals including humans. 
     AI research has been defined as the field of study of intelligent agents, which refers to any system that perceives its environment and takes actions that maximize its chance of achieving its goals.
@@ -75,26 +86,44 @@ def get_sample_text():
     Those who attended would become the leaders of AI research for decades, and many of their students and colleagues made major contributions to the field.
     """
 
+
+# Enhanced TextRank Summarizer with better preprocessing and keyword emphasis
 class TextRankSummarizer:
     def __init__(self):
         self.stop_words = set(stopwords.words('english'))
     
     def preprocess_text(self, text):
+        # Clean the text
         text = re.sub(r'\s+', ' ', text)
         text = re.sub(r'\n', ' ', text)
+        
+        # Tokenize into sentences
         sentences = sent_tokenize(text)
+        
+        # Filter out very short sentences but be less restrictive
         sentences = [s for s in sentences if len(s.split()) >= 3]
+        
         return sentences
     
     def identify_key_terms(self, text, top_n=10):
+        """Identify the most important terms in the text"""
+        # Tokenize and filter out stop words
         words = [w.lower() for w in text.split() if w.lower() not in self.stop_words and len(w) > 3]
+        
+        # Count word frequencies
         word_counts = {}
         for word in words:
             word_counts[word] = word_counts.get(word, 0) + 1
+        
+        # Sort by frequency
         sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        # Return top N words
         return [word for word, count in sorted_words[:top_n]]
     
     def create_sentence_vectors(self, sentences):
+        # Create more effective vectors with better TF-IDF weighting
+        # First, build a comprehensive word frequency dictionary
         word_freq = {}
         sentence_words = []
         
@@ -105,41 +134,52 @@ class TextRankSummarizer:
             for word in words:
                 word_freq[word] = word_freq.get(word, 0) + 1
         
+        # Create vectors with improved TF-IDF weighting
         vectors = []
         for words in sentence_words:
             if not words:
-                vectors.append(np.zeros((1,)))
+                vectors.append(np.zeros((1,)))  # Empty vector for empty sentences
                 continue
                 
+            # Count word frequencies in this sentence
             word_counts = {}
             for word in words:
                 word_counts[word] = word_counts.get(word, 0) + 1
             
+            # Create the vector with TF-IDF weighting
             vec = np.zeros((len(words),))
             for i, word in enumerate(words):
+                # Term frequency in this sentence (normalized)
                 tf = word_counts[word] / len(words)
+                # Inverse document frequency with smoothing
                 idf = np.log(len(sentences) / (word_freq[word] + 1))
-                vec[i] = (1 + np.log(tf)) * idf
+                # TF-IDF with sublinear scaling
+                vec[i] = (1 + np.log(tf)) * idf  # Sublinear TF scaling
             
             vectors.append(vec)
         
         return vectors
     
     def build_similarity_matrix(self, vectors):
+        # Create similarity matrix
         sim_mat = np.zeros([len(vectors), len(vectors)])
         
         for i in range(len(vectors)):
             for j in range(len(vectors)):
                 if i != j and vectors[i].size > 0 and vectors[j].size > 0:
+                    # Use cosine similarity
                     sim_mat[i][j] = self.cosine_similarity_manual(vectors[i], vectors[j])
         
         return sim_mat
     
     def cosine_similarity_manual(self, vec1, vec2):
+        # Ensure vectors are of same length for comparison by padding the shorter one
         if len(vec1) != len(vec2):
             if len(vec1) < len(vec2):
+                # Pad vec1 with zeros
                 vec1 = np.pad(vec1, (0, len(vec2) - len(vec1)), 'constant')
             else:
+                # Pad vec2 with zeros
                 vec2 = np.pad(vec2, (0, len(vec1) - len(vec2)), 'constant')
         
         if np.sum(vec1) == 0 or np.sum(vec2) == 0:
@@ -148,6 +188,7 @@ class TextRankSummarizer:
         return np.dot(vec1, vec2) / (np.sqrt(np.sum(vec1**2)) * np.sqrt(np.sum(vec2**2)))
     
     def boost_key_sentences(self, sentences, sentence_scores, key_terms):
+        """Boost scores of sentences containing key terms"""
         boosted_scores = []
         
         for i, (sentence, score) in enumerate(sentence_scores):
@@ -155,79 +196,108 @@ class TextRankSummarizer:
             boost = 0
             for term in key_terms:
                 if term in sentence_lower:
-                    boost += 0.1
+                    boost += 0.1  # Add boost for each key term
             
             boosted_scores.append((sentence, score + boost))
         
         return boosted_scores
     
     def add_positional_weighting(self, sentences, sentence_scores):
+        """Add weight to sentences based on their position"""
         position_weighted = sentence_scores.copy()
         
+        # Boost first sentence
         if len(sentences) > 0:
             position_weighted[0] = (sentences[0], position_weighted[0][1] + 0.15)
         
+        # Boost last sentence
         if len(sentences) > 1:
             position_weighted[-1] = (sentences[-1], position_weighted[-1][1] + 0.1)
         
+        # Identify paragraph breaks and boost first sentences of paragraphs
         for i in range(1, len(sentences)):
+            # Check if this might be a paragraph start
             if len(sentences[i-1].split()) < 10 or sentences[i-1].endswith(('.', '!', '?')):
                 position_weighted[i] = (sentences[i], position_weighted[i][1] + 0.1)
         
         return position_weighted
     
     def get_sentence_scores(self, text, sentences):
+        # Preprocess and get sentence vectors
         clean_sentences = sentences
         sentence_vectors = self.create_sentence_vectors(clean_sentences)
         
+        # Build similarity matrix
         similarity_matrix = self.build_similarity_matrix(sentence_vectors)
         
+        # Apply PageRank algorithm with more iterations for better convergence
         nx_graph = nx.from_numpy_array(similarity_matrix)
         scores = nx.pagerank(nx_graph, max_iter=200, tol=1e-06)
         
+        # Create dictionary with sentence text and its score
         sentence_scores = [(clean_sentences[i], scores[i]) for i in range(len(clean_sentences))]
         
+        # Identify key terms in the text
         key_terms = self.identify_key_terms(text)
         
+        # Apply boosting for sentences containing key terms
         sentence_scores = self.boost_key_sentences(clean_sentences, sentence_scores, key_terms)
         
+        # Apply positional weighting
         sentence_scores = self.add_positional_weighting(clean_sentences, sentence_scores)
         
         return sentence_scores, clean_sentences
     
     def adaptive_ratio(self, sentences):
+        """Calculate an adaptive ratio based on text length"""
         sentence_count = len(sentences)
         
+        # For shorter texts, highlight more
         if sentence_count < 5:
-            return 0.6
+            return 0.6  # Highlight 60%
         elif sentence_count < 10:
-            return 0.5
+            return 0.5  # Highlight 50%
         elif sentence_count < 20:
-            return 0.4
+            return 0.4  # Highlight 40%
         else:
-            return 0.35
+            return 0.35  # Default to 35% for longer texts
     
     def summarize(self, text, ratio=0.3):
+        """
+        Summarize the text using improved TextRank algorithm
+        
+        :param text: Input text to summarize
+        :param ratio: Proportion of sentences to include in summary (0.0 to 1.0)
+        :return: List of (sentence, score) tuples sorted by position in original text
+        """
+        # Preprocess text
         clean_sentences = self.preprocess_text(text)
         
         if not clean_sentences:
             return []
         
+        # If adaptive ratio is requested (ratio=0), calculate based on text length
         if ratio <= 0:
             ratio = self.adaptive_ratio(clean_sentences)
             
+        # Get sentence scores with all enhancements
         sentence_scores, _ = self.get_sentence_scores(text, clean_sentences)
         
+        # Sort sentences by score in descending order
         ranked_sentences = sorted(sentence_scores, key=lambda x: x[1], reverse=True)
         
+        # Select top sentences based on ratio, but use a minimum of 1 sentence
+        # or 30% of sentences, whichever is greater
         min_sentences = max(1, int(len(clean_sentences) * 0.3))
         num_sentences = max(min_sentences, int(len(clean_sentences) * ratio))
         
+        # Cap at 70% of sentences to avoid highlighting almost everything
         max_sentences = int(len(clean_sentences) * 0.7)
         num_sentences = min(num_sentences, max_sentences)
         
         top_sentences = ranked_sentences[:num_sentences]
         
+        # Sort by position in original text
         original_order = []
         for sentence, score in top_sentences:
             index = clean_sentences.index(sentence)
@@ -235,34 +305,49 @@ class TextRankSummarizer:
         
         original_order.sort()
         
+        # Return sentences with their scores
         return [(sentence, score) for _, sentence, score in original_order]
 
+
+# Enhanced TF-IDF Summarizer with domain adaptation and key term emphasis
 class TFIDFSummarizer:
     def __init__(self):
         self.stop_words = set(stopwords.words('english'))
     
     def preprocess_text(self, text):
+        # Clean the text
         text = re.sub(r'\s+', ' ', text)
         text = re.sub(r'\n', ' ', text)
         
+        # Tokenize into sentences
         sentences = sent_tokenize(text)
+        
+        # Filter out very short sentences but be less restrictive
         sentences = [s for s in sentences if len(s.split()) >= 3]
+        
         return sentences
     
     def identify_key_terms(self, text, top_n=10):
+        """Identify the most important terms in the text"""
+        # Tokenize and filter out stop words
         words = [w.lower() for w in text.split() if w.lower() not in self.stop_words and len(w) > 3]
         
+        # Count word frequencies
         word_counts = {}
         for word in words:
             word_counts[word] = word_counts.get(word, 0) + 1
         
+        # Sort by frequency
         sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
         
+        # Return top N words
         return [word for word, count in sorted_words[:top_n]]
     
     def detect_domain(self, text):
+        """Detect the domain of the text based on keyword presence"""
         text_lower = text.lower()
         
+        # Define domain-specific keywords
         domains = {
             'science': ['research', 'study', 'data', 'analysis', 'results', 'experiment', 
                       'scientific', 'hypothesis', 'methodology', 'findings'],
@@ -276,19 +361,23 @@ class TFIDFSummarizer:
                        'academic', 'university', 'knowledge', 'classroom', 'curriculum']
         }
         
+        # Count occurrences of domain-specific words
         domain_scores = {}
         for domain, keywords in domains.items():
             score = sum(1 for keyword in keywords if keyword in text_lower)
             domain_scores[domain] = score
         
+        # Return the domain with the highest score
         if max(domain_scores.values()) > 0:
             return max(domain_scores.items(), key=lambda x: x[1])[0]
         else:
             return 'general'
     
     def add_domain_weighting(self, sentences, sentence_scores, domain="general"):
+        """Add domain-specific weighting to sentences"""
         boosted_scores = sentence_scores.copy()
         
+        # Define domain-specific keywords
         domain_keywords = {
             'science': ["research", "study", "found", "results", "conclusion", 
                       "experiment", "data", "analysis", "evidence", "significant"],
@@ -302,51 +391,68 @@ class TFIDFSummarizer:
                         "study", "knowledge", "skills", "understanding", "curriculum"]
         }
         
+        # Use general keywords if domain not specified or recognized
         if domain not in domain_keywords:
             domain = "general"
             domain_keywords["general"] = ["important", "significant", "key", "main", 
                                        "essential", "critical", "fundamental", "notably"]
         
+        # Boost sentences containing domain-specific terms
         for i, (sentence, score) in enumerate(sentence_scores):
             sentence_lower = sentence.lower()
             boost = 0
             
             for keyword in domain_keywords[domain]:
                 if keyword in sentence_lower:
-                    boost += 0.05
+                    boost += 0.05  # Boost for each domain keyword
             
             boosted_scores[i] = (sentence, score + boost)
         
         return boosted_scores
     
     def add_positional_weighting(self, sentences, sentence_scores):
+        """Add positional weighting to sentences"""
         position_weighted = sentence_scores.copy()
         
+        # Boost first sentence
         if len(sentences) > 0:
             position_weighted[0] = (sentences[0], position_weighted[0][1] + 0.15)
         
+        # Boost last sentence
         if len(sentences) > 1:
             position_weighted[-1] = (sentences[-1], position_weighted[-1][1] + 0.1)
         
+        # Identify paragraph breaks and boost first sentences of paragraphs
         for i in range(1, len(sentences)):
+            # Check if this might be a paragraph start
             if len(sentences[i-1].split()) < 10 or sentences[i-1].endswith(('.', '!', '?')):
                 position_weighted[i] = (sentences[i], position_weighted[i][1] + 0.1)
         
         return position_weighted
     
     def adaptive_ratio(self, sentences):
+        """Calculate an adaptive ratio based on text length"""
         sentence_count = len(sentences)
         
+        # For shorter texts, highlight more
         if sentence_count < 5:
-            return 0.6
+            return 0.6  # Highlight 60%
         elif sentence_count < 10:
-            return 0.5
+            return 0.5  # Highlight 50%
         elif sentence_count < 20:
-            return 0.4
+            return 0.4  # Highlight 40%
         else:
-            return 0.35
+            return 0.35  # Default to 35% for longer texts
     
     def summarize(self, text, ratio=0.3):
+        """
+        Summarize text using improved TF-IDF scoring
+        
+        :param text: Input text to summarize
+        :param ratio: Proportion of sentences to include in summary (0.0 to 1.0)
+        :return: List of (sentence, score) tuples sorted by position in original text
+        """
+        # Preprocess text and get sentences
         sentences = self.preprocess_text(text)
         
         if not sentences:
@@ -355,38 +461,48 @@ class TFIDFSummarizer:
         if len(sentences) <= 1:
             return [(sentences[0], 1.0)] if sentences else []
         
+        # If adaptive ratio is requested (ratio=0), calculate based on text length
         if ratio <= 0:
             ratio = self.adaptive_ratio(sentences)
         
+        # Create enhanced TF-IDF vectorizer
         vectorizer = TfidfVectorizer(
             stop_words='english', 
             norm='l2',
             smooth_idf=True,
-            sublinear_tf=True,
-            max_features=1000,
-            min_df=1
+            sublinear_tf=True,  # Apply sublinear tf scaling
+            max_features=1000,  # Limit to most frequent words
+            min_df=1            # Include words that appear at least once
         )
         
+        # Generate TF-IDF matrix
         tfidf_matrix = vectorizer.fit_transform(sentences)
         
+        # Get feature names (words)
         feature_names = vectorizer.get_feature_names_out()
         
+        # Calculate sentence scores based on sum of TF-IDF values
         sentence_scores = []
         
         for i, sentence in enumerate(sentences):
+            # Get the TF-IDF values for this sentence
             tfidf_values = tfidf_matrix[i].toarray()[0]
             
+            # Calculate score - use mean of top X% of TF-IDF values
+            # This focuses on the most important words rather than all words
             if len(tfidf_values) > 0:
                 sorted_values = sorted(tfidf_values, reverse=True)
-                top_n = max(1, int(len(sorted_values) * 0.3))
-                score = np.mean(sorted_values[:top_n]) * np.sum(tfidf_values > 0)
+                top_n = max(1, int(len(sorted_values) * 0.3))  # Top 30% of values
+                score = np.mean(sorted_values[:top_n]) * np.sum(tfidf_values > 0)  # Also factor in number of important words
             else:
                 score = 0
                 
             sentence_scores.append((sentence, score))
         
+        # Identify key terms
         key_terms = self.identify_key_terms(text)
         
+        # Boost sentences containing key terms
         for i, (sentence, score) in enumerate(sentence_scores):
             sentence_lower = sentence.lower()
             boost = 0
@@ -397,13 +513,17 @@ class TFIDFSummarizer:
             
             sentence_scores[i] = (sentence, score + boost)
         
+        # Detect domain and add domain-specific weighting
         domain = self.detect_domain(text)
         sentence_scores = self.add_domain_weighting(sentences, sentence_scores, domain)
         
+        # Add positional weighting
         sentence_scores = self.add_positional_weighting(sentences, sentence_scores)
         
+        # Sort sentences by score in descending order
         ranked_sentences = sorted(sentence_scores, key=lambda x: x[1], reverse=True)
         
+        # Select top sentences based on ratio, with smart minimum and maximum
         min_sentences = max(1, int(len(sentences) * 0.3))
         num_sentences = max(min_sentences, int(len(sentences) * ratio))
         max_sentences = int(len(sentences) * 0.7)
@@ -411,6 +531,7 @@ class TFIDFSummarizer:
         
         top_sentences = ranked_sentences[:num_sentences]
         
+        # Sort by position in original text to maintain original flow
         original_order = []
         for sentence, score in top_sentences:
             index = sentences.index(sentence)
@@ -418,9 +539,11 @@ class TFIDFSummarizer:
         
         original_order.sort()
         
+        # Return sentences with their scores
         return [(sentence, score) for _, sentence, score in original_order]
 
-# HTML template for the frontend.
+
+# Improved HTML Template with enhanced JS for better highlighting
 HTML_TEMPLATE = r'''
 <!DOCTYPE html>
 <html lang="en">
@@ -1378,12 +1501,15 @@ Those who attended would become the leaders of AI research for decades, and many
 </html>
 '''
 
+
 def start_web_app():
     app = Flask(__name__)
     
+    # Initialize NLTK first
     print("Initializing NLTK resources for web app...")
     initialize_nltk()
     
+    # Initialize summarizers
     print("Initializing summarizers...")
     try:
         text_rank = TextRankSummarizer()
@@ -1409,34 +1535,42 @@ def start_web_app():
                 return jsonify({'error': 'No text provided'}), 400
                 
             text = data.get('text')
-            algorithm = data.get('algorithm', 'textrank')
-            ratio = float(data.get('ratio', 0.3))
+            algorithm = data.get('algorithm', 'textrank')  # Default to TextRank
+            ratio = float(data.get('ratio', 0.3))  # Default to 30% of sentences
             include_key_terms = data.get('include_key_terms', False)
             
+            # Validate ratio
             if ratio < 0 or ratio > 1:
+                # If ratio is 0, use adaptive ratio instead
                 if ratio == 0:
-                    ratio = -1
+                    ratio = -1  # Signal to use adaptive ratio
                 else:
                     return jsonify({'error': 'Ratio must be between 0 and 1'}), 400
             
+            # Initialize summarizers if not done already
             nonlocal text_rank, tfidf
             if text_rank is None:
                 text_rank = TextRankSummarizer()
             if tfidf is None:
                 tfidf = TFIDFSummarizer()
             
+            # Auto-detect best algorithm if requested
             if algorithm.lower() == 'auto':
+                # Detect text characteristics to choose algorithm
                 sentences = text_rank.preprocess_text(text)
                 
+                # Use TextRank for longer, more complex texts
+                # Use TF-IDF for shorter, more factual texts
                 avg_sentence_length = sum(len(s.split()) for s in sentences) / max(1, len(sentences))
                 
                 if len(sentences) > 15 or avg_sentence_length > 20:
-                    algorithm = 'textrank'
+                    algorithm = 'textrank'  # Better for longer, complex texts
                 else:
-                    algorithm = 'tfidf'
+                    algorithm = 'tfidf'  # Better for shorter, factual texts
                 
                 print(f"Auto-detected algorithm: {algorithm}")
                 
+            # Select algorithm
             if algorithm.lower() == 'textrank':
                 result = text_rank.summarize(text, ratio)
                 if include_key_terms:
@@ -1448,6 +1582,7 @@ def start_web_app():
             else:
                 return jsonify({'error': 'Invalid algorithm specified'}), 400
                 
+            # Convert to list of dicts for JSON serialization
             summary_data = [{"sentence": sentence, "score": float(score)} for sentence, score in result]
             
             response_data = {
@@ -1456,6 +1591,7 @@ def start_web_app():
                 'ratio': ratio if ratio > 0 else 'adaptive'
             }
             
+            # Include key terms if requested
             if include_key_terms:
                 response_data['key_terms'] = key_terms
                 
@@ -1469,6 +1605,8 @@ def start_web_app():
     print("Starting web application. Open http://localhost:5000 in your browser")
     app.run(debug=True, host='0.0.0.0', port=5000)
 
+
+# Main function for command-line usage
 def main():
     parser = argparse.ArgumentParser(description='AI Speed Reader Pro - Extract important sentences from text')
     parser.add_argument('--file', type=str, help='Path to the text file to summarize')
@@ -1481,21 +1619,27 @@ def main():
                         help='Start web interface instead of CLI mode')
     args = parser.parse_args()
     
+    # Initialize NLTK
     initialize_nltk()
     
+    # If web flag is set, start the web app
     if args.web:
         start_web_app()
         return
     
+    # Load text from file or use sample text
     if args.file:
+        # Check if file exists
         if not os.path.exists(args.file):
             print(f"Error: File '{args.file}' not found.")
+            # Create sample file with the same name
             if ensure_sample_file_exists(args.file):
                 print(f"Created sample file '{args.file}' for you to use.")
             else:
                 print("Using built-in sample text instead.")
                 args.file = None
                 
+    # Read file if provided and exists
     if args.file and os.path.exists(args.file):
         try:
             with open(args.file, 'r', encoding='utf-8') as file:
@@ -1506,40 +1650,50 @@ def main():
             print("Using built-in sample text instead.")
             text = get_sample_text()
     else:
+        # Use a sample text if no file provided
         text = get_sample_text()
         print("Using built-in sample text.")
     
+    # Auto-detect best algorithm if requested
     if args.algorithm == 'auto':
+        # Initialize a summarizer temporarily
         temp_summarizer = TextRankSummarizer()
         sentences = temp_summarizer.preprocess_text(text)
         
+        # Use TextRank for longer, more complex texts
+        # Use TF-IDF for shorter, more factual texts
         avg_sentence_length = sum(len(s.split()) for s in sentences) / max(1, len(sentences))
         
         if len(sentences) > 15 or avg_sentence_length > 20:
-            algorithm = 'textrank'
+            algorithm = 'textrank'  # Better for longer, complex texts
         else:
-            algorithm = 'tfidf'
+            algorithm = 'tfidf'  # Better for shorter, factual texts
         
         print(f"Auto-detected algorithm: {algorithm}")
     else:
         algorithm = args.algorithm
     
+    # Initialize the selected summarizer
     if algorithm == 'textrank':
         summarizer = TextRankSummarizer()
-    else:
+    else:  # tfidf
         summarizer = TFIDFSummarizer()
     
     try:
+        # Use adaptive ratio if requested (ratio=0)
         ratio = args.ratio
         if ratio <= 0:
             sentences = summarizer.preprocess_text(text)
             ratio = summarizer.adaptive_ratio(sentences)
             print(f"Using adaptive highlight ratio: {ratio:.2f} ({int(ratio*100)}%)")
         
+        # Generate summary
         summary = summarizer.summarize(text, ratio)
         
+        # Identify key terms
         key_terms = summarizer.identify_key_terms(text)
         
+        # Print results
         print(f"\nOriginal text ({len(text.split())} words):\n")
         print(text)
         
@@ -1552,14 +1706,16 @@ def main():
         print(f"\nHighlighted version:\n")
         original_sentences = summarizer.preprocess_text(text)
         for sentence in original_sentences:
+            # Check if this sentence is in the summary
             is_highlighted = any(s == sentence for s, _ in summary)
             if is_highlighted:
-                print(f"\033[1;33m{sentence}\033[0m")
+                print(f"\033[1;33m{sentence}\033[0m")  # Print in yellow and bold
             else:
                 print(sentence)
     except Exception as e:
         print(f"Error generating summary: {str(e)}")
         traceback.print_exc()
 
+
 if __name__ == "__main__":
-    main()
+    main()# AI-Powered Speed Reader Pro (Enhanced Version)
