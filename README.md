@@ -2,8 +2,6 @@
 
 RetroScan is an advanced text analysis application that uses AI algorithms to intelligently highlight the most important sentences in any text. The application helps users save time by focusing on the most relevant content while maintaining full comprehension.
 
-![RetroScan Screenshot](https://placeholder-for-your-screenshot.com/retroscan.png)
-
 ## 🚀 Features
 
 - **Dual Algorithm System**: Uses both TextRank and TF-IDF to adapt to different text types
@@ -29,7 +27,7 @@ RetroScan is an advanced text analysis application that uses AI algorithms to in
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/retroscan.git
+   git clone https://github.com/saim123321/Retro-Scan.git
    cd retroscan
    ```
 
@@ -149,10 +147,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+6. If anyone want to deploy this app then please go ahead and tag me or inform me.
 
 ## 🙏 Acknowledgements
 
